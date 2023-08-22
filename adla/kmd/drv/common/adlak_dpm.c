@@ -27,22 +27,9 @@
 #include "adlak_platform_config.h"
 #include "adlak_submit.h"
 /************************** Constant Definitions *****************************/
-#define CONFIG_ADLAK_FREQ_ADJUST_NO (5)
-/**************************** Type Definitions *******************************/
 
-struct adlak_power_info {
-    struct adlak_device *padlak;
-    int32_t              invoke_task_cnt;
-    int32_t              cnt_elapsed;
-    int32_t              cnt_idel;
-    int32_t              cnt_busy;
-    int32_t              freq_cfg_idx;
-    int32_t              freq_cfg_list[2][CONFIG_ADLAK_FREQ_ADJUST_NO];  // 0:core freq; 1:axi freq
-    int32_t              core_freq_cur;
-    int32_t              axi_freq_cur;
-    int32_t              core_freq_expect;
-    int32_t              axi_freq_expect;
-};
+
+/**************************** Type Definitions *******************************/
 
 /***************** Macros (Inline Functions) Definitions *********************/
 

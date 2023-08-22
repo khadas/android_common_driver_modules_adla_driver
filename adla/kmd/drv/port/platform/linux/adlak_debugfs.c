@@ -26,6 +26,7 @@
 #include "adlak_hw.h"
 #include "adlak_io.h"
 #include "adlak_submit.h"
+#include "adlak_dpm.h"
 /************************** Constant Definitions *****************************/
 
 /**************************** Type Definitions *******************************/
@@ -275,11 +276,151 @@ end:
 
 static DEVICE_ATTR_RW(reg);
 
+typedef enum Adla_HW_Version {
+    r0p0            = 0,
+    r1p0            = 1,
+    r2p0            = 2,
+    r3p0            = 3,
+}adla_hw_version;
+
+typedef struct Adla_hw_info {
+    char *                      hw_ver;
+    uint32_t                    hw_release_id;
+    uint32_t                    hw_patch_id;
+    uint32_t                    mac_no_i8;
+    uint32_t                    mac_no_i16;
+    uint32_t                    max_frq;
+    uint32_t                    GOPS;
+    bool                        kernel_vlc;
+    bool                        feature_vlc;
+    uint64_t                    sram_base;
+    uint64_t                    sram_size;
+}adla_hw_info;
+
+static adla_hw_info c3_hw_info = {
+    .hw_ver             = "r0p0",
+    .hw_release_id      = 0,
+    .hw_patch_id        = 0,
+    .mac_no_i8          = 512,
+    .mac_no_i16         = 128,
+    .max_frq            = 800,
+    .GOPS               = 800,
+    .kernel_vlc         = true,
+    .feature_vlc        = true,
+};
+static adla_hw_info s5_hw_info = {
+    .hw_ver             = "r1p0",
+    .hw_release_id      = 1,
+    .hw_patch_id        = 0,
+    .mac_no_i8          = 2048,
+    .mac_no_i16         = 512,
+    .max_frq            = 800,
+    .GOPS               = 3200,
+    .kernel_vlc         = false,
+    .feature_vlc        = false,
+};
+static adla_hw_info t7c_hw_info = {
+    .hw_ver             = "r2p0",
+    .hw_release_id      = 2,
+    .hw_patch_id        = 0,
+    .mac_no_i8          = 2048,
+    .mac_no_i16         = 512,
+    .max_frq            = 800,
+    .GOPS               = 3200,
+    .kernel_vlc         = false,
+    .feature_vlc        = false,
+};
+static adla_hw_info t3x_hw_info = {
+    .hw_ver             = "r3p0",
+    .hw_release_id      = 3,
+    .hw_patch_id        = 0,
+    .mac_no_i8          = 2048,
+    .mac_no_i16         = 512,
+    .max_frq            = 800,
+    .GOPS               = 3200,
+    .kernel_vlc         = true,
+    .feature_vlc        = true,
+};
+
+static int adlak_get_hw_info (struct adlak_device *padlak, char *buf, size_t size)
+{
+    int count                       = 0;
+    int32_t device_release_id       = 0;
+    int32_t device_patch_id         = 0;
+    uint32_t val                    = 0;
+    int buf_size                    = size;
+    uint32_t cur_freq               = 0;
+    struct io_region *region        = padlak->hw_res.preg;
+    adla_hw_info *hw_info           = NULL;
+
+    if (padlak->is_suspend) {
+        adlak_platform_resume(padlak);
+    }
+
+    cur_freq = (uint32_t)padlak->clk_core_freq_set;
+    val = adlak_read32(region, 0x0);
+    device_release_id = (val >> 8) & 0xff;
+    device_patch_id   = val & 0xff;
+
+    switch (device_release_id) {
+        case r0p0 :
+            hw_info = &c3_hw_info;
+            break;
+        case r1p0 :
+            hw_info = &s5_hw_info;
+            break;
+        case r2p0 :
+            hw_info = &t7c_hw_info;
+            break;
+        case r3p0 :
+            hw_info = &t3x_hw_info;
+            break;
+        default :
+            count = adlak_os_snprintf(buf, buf_size, "devices not support.\n");
+            return count;
+    }
+    hw_info->sram_base = padlak->hw_res.adlak_sram_pa;
+    hw_info->sram_size = padlak->hw_res.adlak_sram_size;
+
+    count = adlak_os_snprintf(buf, buf_size, "npu hw info :\n");
+    count += adlak_os_snprintf(buf + count, buf_size - count, "    adla hw version : %s\n", hw_info->hw_ver);
+    count += adlak_os_snprintf(buf + count, buf_size - count, "    adla i8 mac_cnt : %d\n", hw_info->mac_no_i8);
+    count += adlak_os_snprintf(buf + count, buf_size - count, "    adla max clk    : %d\n", hw_info->max_frq);
+    count += adlak_os_snprintf(buf + count, buf_size - count, "    adla Gops       : %d\n", hw_info->GOPS);
+
+    if (hw_info->kernel_vlc) {
+        count += adlak_os_snprintf(buf + count, buf_size - count, "    adla kernel vlc : true\n");
+    } else {
+        count += adlak_os_snprintf(buf + count, buf_size - count, "    adla kernel vlc : false\n");
+    }
+    if (hw_info->feature_vlc) {
+        count += adlak_os_snprintf(buf + count, buf_size - count, "    adla feature vlc: true\n");
+    } else {
+        count += adlak_os_snprintf(buf + count, buf_size - count, "    adla feature vlc: false\n");
+    }
+    count += adlak_os_snprintf(buf + count, buf_size - count, "    adla cur clk    : %d\n", (int)(cur_freq /1000 /1000));
+
+    count += adlak_os_snprintf(buf + count, buf_size - count, "    adla sram base  : 0x%llx\n", hw_info->sram_base);
+    count += adlak_os_snprintf(buf + count, buf_size - count, "    adla sram size  : 0x%llx\n", hw_info->sram_size);
+
+    return count;
+}
+static ssize_t hw_info_show(struct device *dev, struct device_attribute *attr, char *buf) {
+    struct adlak_device *padlak = dev_get_drvdata(dev);
+    size_t size                 = 0;
+    size = MAX_CHAR_SYSFS;
+    return adlak_get_hw_info(padlak,buf,size);
+}
+static ssize_t hw_info_store(struct device *dev, struct device_attribute *attr, const char *buf,
+                           size_t count) {return count;}
+
+static DEVICE_ATTR_RW(hw_info);
 static struct attribute *adlak_debug_attrs[] = {
     &dev_attr_tasks.attr,
-    &dev_attr_clock_gating.attr,
-    &dev_attr_reset.attr,
+//    &dev_attr_clock_gating.attr,
+//    &dev_attr_reset.attr,
     &dev_attr_reg.attr,
+    &dev_attr_hw_info.attr,
     NULL,
 };
 
@@ -289,7 +430,7 @@ static const struct attribute_group adlak_debug_attr_group = {
 };
 
 static const struct attribute_group *adlak_attr_groups[] = {
-#if ADLAK_DEBUG
+#if 1//ADLAK_DEBUG
     &adlak_debug_attr_group,
 #endif
     NULL,
