@@ -28,9 +28,9 @@ extern "C" {
 #endif
 
 /************************** Constant Definitions *****************************/
-#define CONFIG_ADLAK_FREQ_ADJUST_NO (5)
 
 /**************************Global Variable************************************/
+#define CONFIG_ADLAK_FREQ_ADJUST_NO (5)
 
 /**************************Type Definition and Structure**********************/
 enum ADLAK_DPM_STRATEGY {

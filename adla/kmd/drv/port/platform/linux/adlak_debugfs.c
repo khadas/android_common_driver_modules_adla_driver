@@ -47,7 +47,7 @@ static ssize_t tasks_show(struct device *dev, struct device_attribute *attr, cha
     struct adlak_device *padlak = dev_get_drvdata(dev);
     ASSERT(padlak);
 
-    return adlak_debug_invoke_list_dump(padlak, 0);
+    return adlak_debug_invoke_list_dump(padlak, 1);
 }
 
 static DEVICE_ATTR_RO(tasks);
@@ -276,6 +276,96 @@ end:
 
 static DEVICE_ATTR_RW(reg);
 
+static ssize_t dpm_period_show(struct device *dev, struct device_attribute *attr, char *buf) {
+    struct adlak_device *padlak = dev_get_drvdata(dev);
+    int count = 0;
+    int buf_size = MAX_CHAR_SYSFS;
+    ASSERT(padlak);
+    if (true == padlak->is_suspend) {
+        count = adlak_os_snprintf(buf, buf_size, "Adla power off.\n");
+    } else {
+        count = adlak_os_snprintf(buf, buf_size, "Adla power on.\n");
+    }
+    count += adlak_os_snprintf(buf + count, buf_size - count, "Adla dpm period  is %d ms.\n", padlak->queue.dev_inference.dpm_period_set);
+    // count += adlak_os_snprintf(buf, MAX_CHAR_SYSFS, "Adla dpm period  is %d ms.\n",padlak->queue.dev_inference.dpm_period_set);
+
+    return count;
+}
+static ssize_t dpm_period_store(struct device *dev, struct device_attribute *attr, const char *buf,
+                           size_t count) {
+    int res = 0;
+    int ret = 0;
+    struct adlak_device *padlak = dev_get_drvdata(dev);
+    ASSERT(padlak);
+
+    ret = kstrtoint(buf, 0, &res);
+    if (ret) {
+        pr_err("kstrtoint failed\n");
+        return -1;
+    }
+    pr_info("Adla dpm period : %d ms ->%d ms\n", padlak->queue.dev_inference.dpm_period_set, res);
+
+    //padlak->dpm_period_set = res;
+    padlak->queue.dev_inference.dpm_period_set = res;
+
+    return count;
+}
+static DEVICE_ATTR_RW(dpm_period);
+
+static int adlak_set_clk_core(struct adlak_device *padlak, uint32_t value)
+{
+    struct adlak_power_info *pdpm_info;
+    pdpm_info = (struct adlak_power_info *)padlak->pdpm;
+
+    pr_info("Adla clk core set : %d Hz ->%d Hz\n", padlak->clk_core_freq_set, value);
+    padlak->clk_core_freq_set = value;
+
+
+    /*set clk immediately*/
+    if (!padlak->is_suspend) {
+        adlak_platform_set_clock((void *)padlak, true, padlak->clk_core_freq_set, padlak->clk_axi_freq_set);
+
+    } else {
+        /*no task currently */
+        adlak_platform_resume(padlak);
+    }
+
+    pdpm_info->core_freq_expect = padlak->clk_core_freq_real;
+    padlak->clk_core_freq_set  = padlak->clk_core_freq_real;
+
+    pdpm_info->freq_cfg_list[0][0] = padlak->clk_core_freq_set;
+
+    pr_info("Adla clk core real set : %d Hz\n", padlak->clk_core_freq_set);
+    return 0;
+
+}
+static ssize_t clk_core_show(struct device *dev, struct device_attribute *attr, char *buf) {
+    struct adlak_device *padlak = dev_get_drvdata(dev);
+    int count = 0;
+    ASSERT(padlak);
+    count += adlak_os_snprintf(buf, MAX_CHAR_SYSFS, "Adla clk core real is %d Hz, set clk is %d Hz.\n",padlak->clk_core_freq_real, padlak->clk_core_freq_set);
+
+    return count;
+}
+static ssize_t clk_core_store(struct device *dev, struct device_attribute *attr, const char *buf,
+                           size_t count) {
+    struct adlak_device *padlak = dev_get_drvdata(dev);
+    uint32_t res                = 0;
+    int ret                     = 0;
+    ASSERT(padlak);
+
+    ret = kstrtoint(buf, 0, &res);
+    if (ret) {
+        pr_err("kstrtoint failed\n");
+        return -1;
+    }
+
+    ret = adlak_set_clk_core(padlak, res);
+
+    return count;
+}
+static DEVICE_ATTR_RW(clk_core);
+
 typedef enum Adla_HW_Version {
     r0p0            = 0,
     r1p0            = 1,
@@ -415,12 +505,98 @@ static ssize_t hw_info_store(struct device *dev, struct device_attribute *attr, 
                            size_t count) {return count;}
 
 static DEVICE_ATTR_RW(hw_info);
+
+static int adlak_get_utilization(struct adlak_device *padlak, char *buf, size_t size) {
+    struct adlak_workqueue *pwq             = &padlak->queue;
+    struct adlak_task *ptask = NULL, *ptask_tmp = NULL;
+    int32_t utilization                     = -1;
+    int count                               = 0;
+    int buf_size                            = size;
+    uint32_t time                           = 0;
+    uint32_t dev_hw_version                 = 0xffffffff;
+    uint64_t dev_macc_count                 = 0;
+    uint32_t cur_freq                       = 0;
+    uint64_t n, base;
+
+    cur_freq = (uint32_t)padlak->clk_core_freq_set / 1000000; //MHz
+
+    dev_hw_version = padlak->dev_hw_version;
+
+    switch (dev_hw_version) {
+        case 0x00000000 :
+            dev_macc_count = 512 * cur_freq; //Mops
+            break;
+        case 0x00000100 :
+        case 0x00000200 :
+        case 0x00000300 :
+            dev_macc_count = 2048 * cur_freq; //Mops
+            break;
+        default :
+            count += adlak_os_snprintf(buf + count, buf_size - count, "dev hw version error,please check!\n");
+            return count;
+    }
+    if (padlak->save_time_en == 0) {
+        count += adlak_os_snprintf(buf + count, buf_size - count, "please [ echo 1 >utilization ] first\n");
+        return count;
+    }
+    if (pwq->sched_num > 0) {
+        list_for_each_entry_safe(ptask, ptask_tmp, &pwq->scheduled_list, head) {
+
+            time = ptask->context->invoke_time_elapsed_total;
+            if (0 == time) {
+                count += adlak_os_snprintf(buf + count, buf_size - count, "please wait ...\n");
+            } else {
+                //utilization = (model_macc/1000/1000 * 1000000/time)/(dev_macc_count)*100;
+                n = ptask->context->macc_count *100 ;
+                base = dev_macc_count * time;
+                do_div(n,base);
+                utilization = n;
+            }
+        }
+    }
+    count += adlak_os_snprintf(buf + count, buf_size - count, "    adla utilization : %d %% \n", utilization);
+
+    return count;
+}
+
+static ssize_t utilization_show(struct device *dev, struct device_attribute *attr, char *buf) {
+    struct adlak_device *padlak = dev_get_drvdata(dev);
+    size_t size                 = 0;
+    size = MAX_CHAR_SYSFS;
+    return adlak_get_utilization(padlak,buf,size);
+}
+static ssize_t utilization_store(struct device *dev, struct device_attribute *attr, const char *buf,
+                           size_t count) {
+   struct adlak_device *padlak = dev_get_drvdata(dev);
+   uint32_t res                = 0;
+   int ret                     = 0;
+   ASSERT(padlak);
+
+   ret = kstrtoint(buf, 0, &res);
+   if (ret) {
+       pr_err("kstrtoint failed\n");
+       return -1;
+   }
+   if (1 == res) {
+    padlak->save_time_en = 1;
+   } else {
+    padlak->save_time_en = 0;
+   }
+
+    return count;
+}
+
+static DEVICE_ATTR_RW(utilization);
+
 static struct attribute *adlak_debug_attrs[] = {
     &dev_attr_tasks.attr,
-//    &dev_attr_clock_gating.attr,
-//    &dev_attr_reset.attr,
+    &dev_attr_clock_gating.attr,
+    &dev_attr_reset.attr,
     &dev_attr_reg.attr,
+    &dev_attr_dpm_period.attr,
+    &dev_attr_clk_core.attr,
     &dev_attr_hw_info.attr,
+    &dev_attr_utilization.attr,
     NULL,
 };
 
@@ -430,7 +606,7 @@ static const struct attribute_group adlak_debug_attr_group = {
 };
 
 static const struct attribute_group *adlak_attr_groups[] = {
-#if 1//ADLAK_DEBUG
+#if 1 //ADLAK_DEBUG
     &adlak_debug_attr_group,
 #endif
     NULL,
@@ -511,4 +687,225 @@ void adlak_destroy_class_file(struct class *adlak_class) {
     AML_LOG_DEBUG("%s", __func__);
 
     class_remove_file(adlak_class, &class_attr_loglevel);
+}
+
+static ssize_t adla_debugfs_hw_info_write(struct file *file, const char __user *ubuf, size_t count, loff_t *ppos)
+{
+    return 0;
+}
+static ssize_t adla_debugfs_hw_info_read(struct file *file, char __user *ubuf, size_t count, loff_t *ppos)
+{
+    struct adlak_device *padlak = (struct adlak_device *)file->private_data;
+    char buf[512]               = {0};
+    int  len                    = 0;
+    len = adlak_get_hw_info(padlak,buf,sizeof(buf));
+
+    return simple_read_from_buffer(ubuf, count, ppos, buf, len);
+}
+
+static ssize_t adla_debugfs_clk_core_write(struct file *file, const char __user *ubuf, size_t count, loff_t *ppos)
+{
+    struct adlak_device *padlak = (struct adlak_device *)file->private_data;
+    char buf[128];
+    uint32_t value              = 0;
+    int ret;
+    count = min_t(size_t, count, (sizeof(buf) - 1));
+
+    if (copy_from_user(buf, ubuf, count))
+        return -EFAULT;
+
+    buf[count -1] = 0;
+
+    ret = sscanf(buf, "%d", &value);
+    switch (ret) {
+        case 1 :
+            adlak_set_clk_core(padlak, value);
+            break;
+        default:
+            pr_err("Usage:\n"
+                   "    echo [val] > clk_core;\n");
+            break;
+    }
+
+    return count;
+}
+static ssize_t adla_debugfs_clk_core_read(struct file *file, char __user *ubuf, size_t count, loff_t *ppos)
+{
+    struct adlak_device *padlak = (struct adlak_device *)file->private_data;
+    char buf[512]               = {0};
+    int  len                    = 0;
+    ASSERT(padlak);
+    len += adlak_os_snprintf(buf, sizeof(buf), "Adla clk core real is %d Hz, set clk is %d Hz.\n",
+        padlak->clk_core_freq_real, padlak->clk_core_freq_set);
+
+    return simple_read_from_buffer(ubuf, count, ppos, buf, len);
+}
+
+static uint32_t aml_debugfs_reg_offset = 0;
+
+static ssize_t adla_debugfs_reg_write(struct file *file, const char __user *ubuf, size_t count, loff_t *ppos)
+{
+    struct adlak_device *padlak = (struct adlak_device *)file->private_data;
+    struct io_region *region    = padlak->hw_res.preg;
+    char buf[128]               = {0};
+    uint32_t value, offset;
+    int ret;
+    count = min_t(size_t, count, (sizeof(buf) - 1));
+
+    if (copy_from_user(buf, ubuf, count))
+        return -EFAULT;
+
+    buf[count -1] = 0;
+
+    if (padlak->is_suspend) {
+        adlak_dpm_stage_adjust(padlak, ADLAK_DPM_STRATEGY_MAX);
+    }
+
+    ret = sscanf(buf, "%x %x",&offset, &value);
+    switch (ret) {
+        case 1:
+            aml_debugfs_reg_offset = offset;
+            break;
+        case 2:
+            aml_debugfs_reg_offset = offset;
+            if (0 != adlak_reg_check(padlak, offset)) {
+                pr_info("Invalid parameter\n");
+                goto error;
+            }
+            adlak_write32(region, offset, value);
+            break;
+        default:
+            goto error;
+    }
+error:
+    return count;
+}
+static ssize_t adla_debugfs_reg_read(struct file *file, char __user *ubuf, size_t count, loff_t *ppos)
+{
+    struct adlak_device *padlak = (struct adlak_device *)file->private_data;
+    struct io_region *region    = padlak->hw_res.preg;
+    char buf[512]               = {0};
+    int  len                    = 0;
+
+    if (padlak->is_suspend) {
+        adlak_dpm_stage_adjust(padlak, ADLAK_DPM_STRATEGY_MAX);
+    }
+
+    if (0 != adlak_reg_check(padlak, aml_debugfs_reg_offset)) {
+        pr_info("Invalid parameter\n");
+        goto error;
+    }
+
+    len = adlak_print_reg_info(region, aml_debugfs_reg_offset, buf, sizeof(buf));
+    len += adlak_os_snprintf(buf+len, sizeof(buf)-len, "\n");
+error:
+    return simple_read_from_buffer(ubuf, count, ppos, buf, len);
+}
+
+static ssize_t adla_debugfs_dpm_period_write(struct file *file, const char __user *ubuf, size_t count, loff_t *ppos)
+{
+    struct adlak_device *padlak = (struct adlak_device *)file->private_data;
+    char buf[128];
+    uint32_t value              = 0;
+    int ret;
+
+    count = min_t(size_t, count, (sizeof(buf) - 1));
+
+    if (copy_from_user(buf, ubuf, count))
+        return -EFAULT;
+
+    buf[count -1] = 0;
+
+    ret = sscanf(buf, "%d", &value);
+    switch (ret) {
+        case 1 :
+            pr_info("Adla dpm period : %d ms ->%d ms\n", padlak->queue.dev_inference.dpm_period_set, value);
+            padlak->queue.dev_inference.dpm_period_set = value;
+            break;
+        default:
+            pr_err("Usage:\n"
+                   "    echo [val] > dpm_period;\n");
+            break;
+    }
+
+    return count;
+}
+static ssize_t adla_debugfs_dpm_period_read(struct file *file, char __user *ubuf, size_t count, loff_t *ppos)
+{
+    struct adlak_device *padlak = (struct adlak_device *)file->private_data;
+    char buf[512]               = {0};
+    int  len                    = 0;
+    uint32_t buf_size           = sizeof(buf);
+
+    if (true == padlak->is_suspend) {
+        len = adlak_os_snprintf(buf, buf_size, "Adla power off.\n");
+    } else {
+        len = adlak_os_snprintf(buf, buf_size, "Adla power on.\n");
+    }
+    //len += adlak_os_snprintf(buf + count, buf_size - count, "Adla dpm period  is %d ms.\n",padlak->dpm_period_set);
+    len += adlak_os_snprintf(buf + len, buf_size - len, "Adla dpm period  is %d ms.\n",padlak->queue.dev_inference.dpm_period_set);
+
+    return simple_read_from_buffer(ubuf, count, ppos, buf, len);
+}
+
+#define debugfs_ops_open(a)                                                         \
+    static int adla_debugfs_##a##_open(struct inode *inode, struct file *file)      \
+    {                                                                               \
+        if (inode->i_private)                                                       \
+        {                                                                           \
+            file->private_data = inode->i_private;                                  \
+        }                                                                           \
+        return 0;                                                                   \
+    }
+
+#define debugfs_ops(a)                                              \
+    static const struct file_operations debugfs_##a##_ops = {       \
+        .owner      = THIS_MODULE,                                  \
+        .open       = adla_debugfs_##a##_open,                      \
+        .read       = adla_debugfs_##a##_read,                      \
+        .write      = adla_debugfs_##a##_write,                     \
+    };
+
+#define debugfs_file(a)                                             \
+    debugfs_ops_open(a)                                             \
+    debugfs_ops(a)
+
+
+debugfs_file(hw_info);
+debugfs_file(clk_core);
+debugfs_file(reg);
+debugfs_file(dpm_period);
+
+int adlak_create_debugfs(void *adlak_device) {
+    int                  ret    = 0;
+    struct adlak_device *padlak = NULL;
+    ASSERT(adlak_device);
+    AML_LOG_DEBUG("%s", __func__);
+    padlak = (struct adlak_device *)adlak_device;
+
+    padlak->debugfs_parent = debugfs_create_dir("adla", NULL);
+    if (!padlak->debugfs_parent) {
+        pr_err("create adla debugfs dir failed.\n");
+
+        return -1;
+    }
+
+    debugfs_create_file("hw_info", 0664, padlak->debugfs_parent, (void *)padlak, &debugfs_hw_info_ops);
+    debugfs_create_file("clk_core", 0664, padlak->debugfs_parent, (void *)padlak, &debugfs_clk_core_ops);
+    debugfs_create_file("reg", 0664, padlak->debugfs_parent, (void *)padlak, &debugfs_reg_ops);
+    debugfs_create_file("dpm_period", 0664, padlak->debugfs_parent, (void *)padlak, &debugfs_dpm_period_ops);
+
+    return ret;
+}
+
+void adlak_destroy_debugfs(void *adlak_device) {
+    struct adlak_device *padlak = NULL;
+    ASSERT(adlak_device);
+    AML_LOG_DEBUG("%s", __func__);
+    padlak = (struct adlak_device *)adlak_device;
+
+    if (padlak->debugfs_parent) {
+        debugfs_remove_recursive(padlak->debugfs_parent);
+        padlak->debugfs_parent = NULL;
+    }
 }

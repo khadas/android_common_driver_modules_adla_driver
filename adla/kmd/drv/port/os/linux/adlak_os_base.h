@@ -57,6 +57,9 @@
 #include <linux/of_device.h>
 #include <linux/of_reserved_mem.h>
 #endif
+#if 1//CONFIG_ADLAK_ENABLE_DEBUGFS
+#include <linux/debugfs.h>
+#endif
 #ifdef __cplusplus
 extern "C" {
 #endif
