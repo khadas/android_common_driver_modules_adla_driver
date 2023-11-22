@@ -546,11 +546,16 @@ static int adlak_get_utilization(struct adlak_device *padlak, char *buf, size_t 
             if (0 == time) {
                 count += adlak_os_snprintf(buf + count, buf_size - count, "please wait ...\n");
             } else {
-                //utilization = (model_macc/1000/1000 * 1000000/time)/(dev_macc_count)*100;
-                n = ptask->context->macc_count *100 ;
+                // nn utilization formula is
+                // utilization = (model_macc/1000/1000 * 1000000/time)/(dev_macc_count)*100;
+                // model_macc unit is '1 op', represent model sum macc, div 1000 twice which convert the unit to 'Mop'
+                // time unit is 'us', represent model inference time, mul 1000000 which convert the unit to 's'
+                // the result of "model_macc/1000/1000 * 1000000 /time" unit is 'Mops'
+                // dev_macc_count unit is 'Mops', represent adla computing power
+                // the final result represent unitilization of the current model running on adla, mul 100 which convert to percentage
+                n = ptask->context->macc_count *100;
                 base = dev_macc_count * time;
-                do_div(n,base);
-                utilization = n;
+                utilization = div64_u64(n, base);
             }
         }
     }
