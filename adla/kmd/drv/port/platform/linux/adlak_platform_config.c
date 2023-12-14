@@ -63,7 +63,7 @@ static int adlak_cmd_queue_size = 1024 * 1024;
 
 static int adlak_sch_time_max_ms = 10;
 
-static int adlak_dpm_period = 300;
+static int adlak_dpm_period = 10000;
 
 static int adlak_log_level = -1;
 
@@ -102,7 +102,7 @@ extern uint32_t g_adlak_emu_dev_cmq_total_size;
 struct regulator            *nn_regulator;
 int                         nn_regulator_flag;
 int                         nn_board_id;
-extern int adlak_kthread_cpuid;
+// extern int adlak_kthread_cpuid;
 /************************** Function Prototypes ******************************/
 
 #ifndef CONFIG_OF
@@ -525,7 +525,7 @@ int adlak_platform_get_resource(void *data) {
     padlak->nn_regulator_type = (int)adlak_regulator_nn_available(padlak->dev);
 
     /* bind kthread to cpu1 */
-    adlak_kthread_cpuid = 1;
+    // adlak_kthread_cpuid = 1;
 
     /* get ADLAK IO */
 
