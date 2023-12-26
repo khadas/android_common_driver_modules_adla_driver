@@ -310,8 +310,10 @@ void adlak_os_free_discontiguous(struct adlak_mem *mm, struct adlak_mem_handle *
         adlak_os_mm_vunmap(mm_info);
         adlak_dma_unmap_of_discontiguous(mm, mm_info);
         adlak_os_free_pages((struct page **)mm_info->pages, mm_info->nr_pages);
-        adlak_os_free(mm_info->phys_addrs);
-        adlak_os_free(mm_info->pages);
+        if (mm_info->phys_addrs)
+            adlak_os_free(mm_info->phys_addrs);
+        if (mm_info->pages)
+            adlak_os_free(mm_info->pages);
         mm_info->pages = NULL;
     }
 }
@@ -363,8 +365,10 @@ err_flush_init:
 err_alloc_page:
     adlak_os_free(phys_addrs);
     adlak_os_free_pages(pages, i);
+    mm_info->phys_addrs = NULL;
 err_alloc_phys_addrs:
     adlak_os_free(pages);
+    mm_info->pages = NULL;
 err_alloc_pages:
 
     return ERR(ENOMEM);
@@ -377,8 +381,10 @@ void adlak_os_free_contiguous(struct adlak_mem *mm, struct adlak_mem_handle *mm_
         adlak_os_mm_vunmap(mm_info);
         adlak_dma_unmap_of_contiguous(mm, mm_info);
         adlak_os_free_pages_contiguous((struct page **)mm_info->pages, mm_info->nr_pages);
-        adlak_os_free(mm_info->phys_addrs);
-        adlak_os_free(mm_info->pages);
+        if (mm_info->phys_addrs)
+            adlak_os_free(mm_info->phys_addrs);
+        if (mm_info->pages)
+            adlak_os_free(mm_info->pages);
         mm_info->pages = NULL;
     }
 }
@@ -444,9 +450,11 @@ err_flush_init:
 err_alloc_page:
 err_order:
     adlak_os_free(phys_addrs);
+    mm_info->phys_addrs = NULL;
 
 err_alloc_phys_addrs:
     adlak_os_free(pages);
+    mm_info->pages =  NULL;
 err_alloc_pages:
 
     return ERR(ENOMEM);
