@@ -46,6 +46,7 @@ int adlak_mem_alloc_request(struct adlak_context *context, struct adlak_buf_req 
     AML_LOG_DEBUG("mem_alloc_request size:0x%lX bytes", (uintptr_t)pbuf_req->bytes);
     // step1: allocate mem
     mm_info = adlak_mm_alloc(padlak->mm, pbuf_req);
+    mm_info->mem_type = mm_info->mem_type | ADLAK_ENUM_MEMTYPE_INNER_USER_CACHEABLE; //default user cacheable
 
     if (ADLAK_IS_ERR_OR_NULL(mm_info)) {
         ret = ERR(ENOMEM);

@@ -488,9 +488,11 @@ int adlak_os_attach_ext_mem_phys(struct adlak_mem *mm, struct adlak_mem_handle *
     mm_info->dma_addr   = (dma_addr_t)NULL;
 
     page_continue = phys_to_page(mm_info->phys_addr);
-    if (adlak_dma_map_of_contiguous(mm, mm_info, 0, mm_info->req.bytes, page_continue)) {
+    mm_info->mem_type &= ~(ADLAK_ENUM_MEMTYPE_INNER_USER_CACHEABLE | ADLAK_ENUM_MEMTYPE_INNER_KERNEL_CACHEABLE);
+    /*if (adlak_dma_map_of_contiguous(mm, mm_info, 0, mm_info->req.bytes, page_continue)) {
         adlak_os_free(phys_addrs);
     }
+    */
 
     return ERR(NONE);
 err_alloc_phys_addrs:
@@ -501,7 +503,7 @@ err_alloc_phys_addrs:
 void adlak_os_dettach_ext_mem_phys(struct adlak_mem *mm, struct adlak_mem_handle *mm_info) {
     AML_LOG_DEBUG("%s", __func__);
     if (mm_info->phys_addrs) {
-        adlak_dma_unmap_of_contiguous(mm, mm_info);
+        // adlak_dma_unmap_of_contiguous(mm, mm_info);
         adlak_os_free(mm_info->phys_addrs);
     }
 }
@@ -521,11 +523,10 @@ int adlak_os_mmap(struct adlak_mem *mm, struct adlak_mem_handle *mm_info, void *
 
     // always remap as cacheable Virtual Memory Area
     vm_page_prot = vm_get_page_prot(vma->vm_flags); /*cacheable*/
-    // set as cacheable in userspace
-    mm_info->mem_type = mm_info->mem_type | ADLAK_ENUM_MEMTYPE_INNER_USER_CACHEABLE;
-#if 0
-    vma->vm_page_prot =    pgprot_writecombine(vma->vm_page_prot);/*uncacheable + reorder*/
-#endif
+    // set as cacheable in userspace except bind ext mem(no cache)
+    if (!(mm_info->mem_type & ADLAK_ENUM_MEMTYPE_INNER_USER_CACHEABLE)) {
+        vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);/*uncacheable + reorder*/
+    }
 
     if (mm_info->mem_src == ADLAK_ENUM_MEMSRC_OS) {
         if (mm_info->mem_type & ADLAK_ENUM_MEMTYPE_INNER_CONTIGUOUS) {
