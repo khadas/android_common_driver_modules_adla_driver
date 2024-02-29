@@ -63,7 +63,7 @@ static int adlak_cmd_queue_size = 1024 * 1024;
 
 static int adlak_sch_time_max_ms = 10;
 
-static int adlak_dpm_period = 10000;
+static int adlak_dpm_period = 300;
 
 static int adlak_log_level = -1;
 
