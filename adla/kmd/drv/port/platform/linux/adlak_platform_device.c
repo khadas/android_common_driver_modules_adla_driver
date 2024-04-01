@@ -279,6 +279,11 @@ static int adlak_platform_sys_suspend(struct platform_device *pdev, pm_message_t
     int                  pm_suspend;
 
     adlak_os_printf("%s\n", __func__);
+    if (padlak->is_suspend)
+    {
+        /* do nothing, if devices has been power off */
+        return 0;
+    }
     adlak_os_mutex_lock(&padlak->dev_mutex);
     padlak->pm_suspend = true;
     adlak_os_mutex_unlock(&padlak->dev_mutex);

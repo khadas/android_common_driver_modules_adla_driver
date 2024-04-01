@@ -94,6 +94,10 @@ struct adlak_device {
     int                     major;
     struct clk *            clk_axi;
     struct clk *            clk_core;
+    struct clk *            clk;
+    struct clk *            clk_parent0;
+    struct clk *            clk_parent1;
+
     struct dentry           *debugfs_parent;
 #endif
     int32_t                   net_count;

@@ -602,6 +602,23 @@ int adlak_platform_get_resource(void *data) {
     if (IS_ERR(padlak->clk_core)) {
         AML_LOG_ERR("Failed to get adla_core_clk\n");
     }
+    /*
+        if clk tree power off,it will switch adla_clk to adla_clk_parent1 auto;
+        adla_core_clk -->adla_clk -->adla_clk_parent0/adla_clk_parent1;
+    */
+    padlak->clk = devm_clk_get(padlak->dev, "adla_clk");
+    if (IS_ERR(padlak->clk)) {
+        AML_LOG_WARN("Failed to get clk\n");
+    }
+    padlak->clk_parent0 = devm_clk_get(padlak->dev, "adla_clk_parent0");
+    if (IS_ERR(padlak->clk_parent0)) {
+        AML_LOG_WARN("Failed to get clk_parent0\n");
+    }
+    padlak->clk_parent1 = devm_clk_get(padlak->dev, "adla_clk_parent1");
+    if (IS_ERR(padlak->clk_parent1)) {
+        AML_LOG_WARN("Failed to get clk_parent1\n");
+    }
+
     padlak->clk_axi_freq_set  = adlak_axi_freq;
     padlak->clk_core_freq_set = adlak_core_freq;
     padlak->dpm_period_set    = adlak_dpm_period;
@@ -706,6 +723,17 @@ void adlak_platform_set_clock(void *data, bool enable, int core_freq, int axi_fr
                 clk_disable_unprepare(padlak->clk_core);
             }
             padlak->is_clk_core_enabled = false;
+
+            /*
+                if adla clk has muti parent clk,
+                switch adla clk parent to clk_parent1 when adla clk off;
+            */
+            if (!ADLAK_IS_ERR_OR_NULL(padlak->clk_parent1) &&
+                !ADLAK_IS_ERR_OR_NULL(padlak->clk)) {
+                clk_set_parent(padlak->clk, padlak->clk_parent1);
+                AML_LOG_WARN("clk_set_parent to parent 1\n");
+            }
+
         }
         padlak->clk_core_freq_real = 0;
     } else {
@@ -720,6 +748,16 @@ void adlak_platform_set_clock(void *data, bool enable, int core_freq, int axi_fr
             padlak->is_clk_axi_enabled = true;
         }
         if (false == padlak->is_clk_core_enabled) {
+            /*
+                if adla clk has muti parent clk,
+                switch adla clk parent to clk_parent0 when adla clk on;
+            */
+            if (!ADLAK_IS_ERR_OR_NULL(padlak->clk_parent0) &&
+                !ADLAK_IS_ERR_OR_NULL(padlak->clk)) {
+                clk_set_parent(padlak->clk,padlak->clk_parent0);
+                AML_LOG_WARN("clk_set_parent to parent 0\n");
+            }
+
             if (!ADLAK_IS_ERR_OR_NULL(padlak->clk_core)) {
                 ret = clk_prepare_enable(padlak->clk_core);
                 if (ret) {
